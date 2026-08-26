@@ -1,0 +1,167 @@
+#!/bin/bash
+#
+# gcolor - abre una terminal nueva con un color y, opcionalmente, una etiqueta
+#          grande arriba para identificarla de un vistazo.
+#
+# Uso:  gcolor <color> [etiqueta]
+#       gcolor red terminal1
+#       gcolor purple "base de datos"
+#       gcolor                        -> la lista de colores y como se usa
+#
+# Backend: Ghostty (preferido). Si no esta instalado, cae a GNOME Terminal.
+
+set -u
+
+# ---------------------------------------------------------------- los colores
+# color:fondo:texto:acento:alias,alias:descripcion
+TEMAS=(
+  "red:#3B1E1E:#F8E9A1:#C0563F:rojo,r:vino suave sobre amarillo pastel"
+  "orange:#3D2415:#F7E0CC:#E07A3C:naranja,naranjo:ladrillo sobre durazno claro"
+  "yellow:#3A3312:#F5F0C0:#D9C52B:amarillo,amber,ambar:tabaco sobre arena clara"
+  "green:#2D3E2F:#DCE4C5:#6FA86B:verde,g:bosque apagado sobre beige"
+  "teal:#12302E:#CFEDE7:#3FB3A6:cian,cyan:petroleo profundo sobre menta"
+  "blue:#1B263B:#E0E1DD:#4C8FD1:azul,b:azul noche sobre gris claro"
+  "indigo:#1E1B3D:#DCD9F5:#6F72D4:indigo:tinta sobre lavanda palida"
+  "purple:#2A1B3D:#E7DAF7:#9B6FD4:morado,violeta,p:ciruela sobre lila claro"
+  "pink:#3B1B2C:#F7D9E7:#D4649B:rosa,rosado,magenta:borgona sobre rosa palido"
+  "gray:#22262B:#D6DBE0:#8A97A6:gris,grey,slate:pizarra sobre gris humo"
+  "normal::::default,normal,plain:el perfil predeterminado, sin tocar nada"
+)
+
+hex2rgb() { local h=${1#\#}; printf '%d;%d;%d' "0x${h:0:2}" "0x${h:2:2}" "0x${h:4:2}"; }
+
+# Nombre del comando tal como lo invocaron, para que la ayuda no mienta.
+CMD=$(basename "$0")
+
+uso() {
+  local t nombre bg fg acento alias desc muestra off="\033[0m"
+  echo ""
+  printf '  \033[1m%s <color> [etiqueta]\033[0m\n' "$CMD"
+  echo ""
+  echo "  El color pinta la ventana. La etiqueta —opcional— sale en grande arriba,"
+  echo "  pegada al prompt y en el titulo de la ventana."
+  echo ""
+  printf '  \033[1mLos colores\033[0m\n'
+  for t in "${TEMAS[@]}"; do
+    IFS=: read -r nombre bg fg acento alias desc <<<"$t"
+    if [[ -n "$bg" ]]; then
+      muestra="\033[48;2;$(hex2rgb "$bg")m\033[38;2;$(hex2rgb "$fg")m  ${nombre}  ${off}"
+    else
+      muestra="  ${nombre}  "
+    fi
+    printf '    %b%*s  %-23s %s\n' "$muestra" $(( 8 - ${#nombre} )) "" "${alias//,/, }" "$desc"
+  done
+  echo ""
+  printf '  \033[1mEjemplos\033[0m\n'
+  printf '    %s red terminal1          la roja, etiquetada TERMINAL1\n' "$CMD"
+  printf '    %s purple "base de datos" la etiqueta puede llevar espacios\n' "$CMD"
+  printf '    %s teal                   solo el color, sin etiqueta\n' "$CMD"
+  printf '    %s g deploy               los alias tambien valen\n' "$CMD"
+  echo ""
+}
+
+# ------------------------------------------------------------------ argumentos
+[[ $# -eq 0 ]] && { uso; exit 0; }
+case "$1" in
+  -h|--help|help|ayuda) uso; exit 0 ;;
+esac
+
+PEDIDO="${1,,}"
+shift
+ETIQUETA="${*:-}"
+
+TEMA=""
+for t in "${TEMAS[@]}"; do
+  IFS=: read -r nombre _ _ _ alias _ <<<"$t"
+  if [[ "$nombre" == "$PEDIDO" ]] || [[ ",$alias," == *",$PEDIDO,"* ]]; then
+    TEMA="$t"; break
+  fi
+done
+if [[ -z "$TEMA" ]]; then
+  printf '\n  No conozco el color \033[1m%s\033[0m.\n' "$PEDIDO"
+  uso
+  exit 1
+fi
+
+IFS=: read -r NOMBRE BG FG ACENTO _ _ <<<"$TEMA"
+
+# ------------------------------------------------- el rc que pinta la etiqueta
+# Se genera un rc temporal: carga tu ~/.bashrc, dibuja la etiqueta y deja el
+# nombre pegado al prompt para que siga visible al hacer scroll.
+RC=""
+if [[ -n "$ETIQUETA" ]]; then
+  RC=$(mktemp "${TMPDIR:-/tmp}/gcolor-etiqueta.XXXXXX")
+  {
+    printf '_CS_RC=%q\n'        "$RC"
+    printf '_CS_ETIQUETA=%q\n'  "$ETIQUETA"
+    printf '_CS_ACENTO=%q\n'    "$(hex2rgb "${ACENTO:-#8A97A6}")"
+    printf '_CS_FONDO=%q\n'     "$(hex2rgb "${BG:-#22262B}")"
+    cat <<'CUERPO'
+[ -f ~/.bashrc ] && source ~/.bashrc
+rm -f "$_CS_RC"; unset _CS_RC
+
+_cs_pinta_etiqueta() {
+  local ancho=${COLUMNS:-0}
+  [ "$ancho" -lt 20 ] && ancho=$(tput cols 2>/dev/null || echo 80)
+  local texto="" c i
+  # el nombre en mayusculas y con aire entre letras: se lee de lejos
+  local crudo=${_CS_ETIQUETA^^}
+  for ((i=0; i<${#crudo}; i++)); do
+    c=${crudo:i:1}
+    texto+="$c"
+    [ $((i+1)) -lt ${#crudo} ] && texto+=" "
+  done
+  [ ${#texto} -gt $((ancho-4)) ] && texto=${texto:0:$((ancho-4))}
+  local sobra=$((ancho - ${#texto}))
+  local izq=$((sobra / 2))
+  local der=$((sobra - izq))
+  local barra=""
+  for ((i=0; i<ancho; i++)); do barra+="▀"; done
+  local bar="\033[38;2;${_CS_ACENTO}m"
+  local inv="\033[1;48;2;${_CS_ACENTO}m\033[38;2;${_CS_FONDO}m"
+  local off="\033[0m"
+  printf "%b%s%b\n" "$bar" "$barra" "$off"
+  printf "%b%*s%s%*s%b\n" "$inv" "$izq" "" "$texto" "$der" "" "$off"
+  printf "%b%s%b\n\n" "$bar" "${barra//▀/▄}" "$off"
+}
+
+_cs_pinta_etiqueta
+unset -f _cs_pinta_etiqueta
+
+PS1="\[\033[1;48;2;${_CS_ACENTO}m\033[38;2;${_CS_FONDO}m\] ${_CS_ETIQUETA^^} \[\033[0m\] ${PS1}"
+CUERPO
+  } >"$RC"
+fi
+
+# ------------------------------------------------------------------- lanzar
+lanzar_ghostty() {
+  local args=(--title="${ETIQUETA:-$NOMBRE}")
+  [[ -n "$BG" ]] && args+=(--background="$BG" --foreground="$FG"
+                           --cursor-color="$ACENTO" --selection-background="$ACENTO")
+  if [[ -n "$RC" ]]; then
+    setsid ghostty "${args[@]}" -e bash --init-file "$RC" >/dev/null 2>&1 &
+  else
+    setsid ghostty "${args[@]}" >/dev/null 2>&1 &
+  fi
+  disown
+}
+
+lanzar_gnome() {
+  local args=(--window)
+  [[ -n "$BG" ]] && args+=(--profile="$NOMBRE")
+  if [[ -n "$RC" ]]; then
+    gnome-terminal "${args[@]}" -- bash --init-file "$RC"
+  else
+    gnome-terminal "${args[@]}"
+  fi
+}
+
+if command -v ghostty >/dev/null 2>&1; then
+  lanzar_ghostty
+elif command -v gnome-terminal >/dev/null 2>&1; then
+  lanzar_gnome
+else
+  echo "No encuentro ni ghostty ni gnome-terminal."
+  [[ -n "$RC" ]] && rm -f "$RC"
+  exit 1
+fi
