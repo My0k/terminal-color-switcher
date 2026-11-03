@@ -63,6 +63,28 @@ gcolor                      -> la lista de colores y como se usa
 
 Cada terminal nueva tendra su color, sin modificar las otras ventanas abiertas.
 
+# Recolorear terminales ya abiertas
+
+Sin abrir ventana nueva:
+
+```
+gcolor -a blue          -> recolorea esta misma terminal
+gcolor -l               -> lista las terminales abiertas (tty, carpeta, que corre)
+gcolor -t 3 green       -> recolorea la terminal /dev/pts/3
+gcolor -t 3 red prod    -> ...y le imprime la etiqueta PROD
+gcolor -a normal        -> vuelve a los colores del perfil
+```
+
+Cambia fondo, texto y cursor con secuencias OSC 10/11/12, asi que funciona aunque
+la terminal este ocupada (vim, Claude Code, un build). La etiqueta se imprime
+una vez y queda fija en la **barra de titulo** de la ventana (sin etiqueta, el
+titulo es la carpeta actual). `gcolor -a normal` la quita. No se pega al
+prompt: eso solo lo hace una ventana abierta con `gcolor <color> <etiqueta>`.
+
+Para que Ghostty no pise el titulo, `install.sh` agrega
+`shell-integration-features = no-title` a su config. Los programas que ponen
+su propio titulo (Claude Code, vim) lo cambian mientras corren.
+
 # Los colores
 
 ![La lista de colores que muestra gcolor sin argumentos](docs/colores.png)
@@ -106,6 +128,20 @@ Si le pasas un nombre despues del color, la terminal se abre con:
 
 Tu `~/.bashrc` se carga igual que siempre: la etiqueta se monta encima, no lo
 reemplaza.
+
+# Gris al azar en cada terminal nueva
+
+`install.sh` copia `gris_aleatorio.sh` a `~/.config/gcolor/` y agrega una
+linea a tu `~/.bashrc`. Desde ahi, cada terminal nueva que abras (por ejemplo
+con Ctrl+Alt+T) arranca con un tono de gris distinto, desde casi negro hasta un
+gris oscuro parecido al fondo por defecto de la terminal.
+
+- Las ventanas que abre `gcolor` con un color no se tocan (`gcolor normal` si
+  sale en gris).
+- No hace nada en shells no interactivas, en bash anidadas ni dentro de tmux.
+- Para apagarlo: `export GCOLOR_GRIS=0`. Para acotar el rango:
+  `GCOLOR_GRIS_MIN` / `GCOLOR_GRIS_MAX` (0-255; por defecto 8 y 64).
+- El gris de la ventana actual queda en `$GCOLOR_GRIS_ACTUAL`.
 
 # Requisitos
 

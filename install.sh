@@ -52,6 +52,31 @@ else
 fi
 
 verde "  Listo: $DESTINO/gcolor"
+
+# ------------------------------------------- gris al azar en cada terminal nueva
+GRIS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/gcolor"
+mkdir -p "$GRIS_DIR"
+install -m 644 "$ORIGEN/gris_aleatorio.sh" "$GRIS_DIR/gris_aleatorio.sh"
+LINEA="[ -f \"$GRIS_DIR/gris_aleatorio.sh\" ] && . \"$GRIS_DIR/gris_aleatorio.sh\""
+if ! grep -qF "gcolor/gris_aleatorio.sh" "$HOME/.bashrc" 2>/dev/null; then
+  printf '\n# gcolor: cada terminal nueva con un gris al azar\n%s\n' "$LINEA" >>"$HOME/.bashrc"
+  verde "  Gris al azar activado en ~/.bashrc"
+else
+  verde "  Gris al azar actualizado: $GRIS_DIR/gris_aleatorio.sh"
+fi
+
+# Ghostty pone de titulo la carpeta en cada prompt; se lo apagamos para que
+# gris_aleatorio.sh pueda mostrar la etiqueta de gcolor en la barra de arriba.
+GHOSTTY_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/ghostty/config.ghostty"
+[[ -f "$GHOSTTY_CONF" ]] || GHOSTTY_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/ghostty/config"
+mkdir -p "$(dirname "$GHOSTTY_CONF")"
+if ! grep -q '^[[:space:]]*shell-integration-features' "$GHOSTTY_CONF" 2>/dev/null; then
+  printf '\n# gcolor: el titulo lo pone gris_aleatorio.sh (etiqueta o carpeta)\nshell-integration-features = no-title\n' >>"$GHOSTTY_CONF"
+  verde "  Ghostty: titulo de ventana a cargo de gcolor ($GHOSTTY_CONF)"
+elif ! grep -q 'no-title' "$GHOSTTY_CONF"; then
+  gris "  Aviso: tu config de Ghostty ya define shell-integration-features;"
+  gris "  agregale no-title para que la etiqueta se vea en la barra de arriba."
+fi
 echo ""
 echo "  Pruebalo con:"
 echo "    gcolor              -> la lista de colores"

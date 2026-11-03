@@ -8,6 +8,10 @@
 #       gcolor purple "base de datos"
 #       gcolor                        -> la lista de colores y como se usa
 #
+#       gcolor -a blue                -> recolorea ESTA terminal, sin abrir otra
+#       gcolor -t 3 green             -> recolorea la terminal /dev/pts/3
+#       gcolor -l                     -> lista las terminales abiertas
+#
 # Backend: Ghostty (preferido). Si no esta instalado, cae a GNOME Terminal.
 
 set -u
@@ -25,7 +29,7 @@ TEMAS=(
   "purple:#2A1B3D:#E7DAF7:#9B6FD4:morado,violeta,p:ciruela sobre lila claro"
   "pink:#3B1B2C:#F7D9E7:#D4649B:rosa,rosado,magenta:borgona sobre rosa palido"
   "gray:#22262B:#D6DBE0:#8A97A6:gris,grey,slate:pizarra sobre gris humo"
-  "normal::::default,normal,plain:el perfil predeterminado, sin tocar nada"
+  "normal::::default,normal,plain:gris al azar, como una terminal nueva cualquiera"
 )
 
 hex2rgb() { local h=${1#\#}; printf '%d;%d;%d' "0x${h:0:2}" "0x${h:2:2}" "0x${h:4:2}"; }
@@ -58,13 +62,60 @@ uso() {
   printf '    %s teal                   solo el color, sin etiqueta\n' "$CMD"
   printf '    %s g deploy               los alias tambien valen\n' "$CMD"
   echo ""
+  printf '  \033[1mTerminales ya abiertas\033[0m\n'
+  printf '    %s -a blue                recolorea esta misma terminal\n' "$CMD"
+  printf '    %s -t 3 green             recolorea la terminal /dev/pts/3\n' "$CMD"
+  printf '    %s -t 3 red prod          ...y le imprime la etiqueta PROD\n' "$CMD"
+  printf '    %s -a normal              vuelve a los colores por defecto\n' "$CMD"
+  printf '    %s -l                     lista las terminales abiertas\n' "$CMD"
+  echo ""
+}
+
+# Las terminales abiertas: una linea por /dev/pts/N, con su carpeta y lo que
+# esta corriendo en primer plano, para saber cual es cual.
+listar() {
+  local yo pts n lider cwd fg
+  yo=$(tty 2>/dev/null)
+  echo ""
+  printf '  \033[1m%-7s %-28s %s\033[0m\n' "tty" "carpeta" "corriendo"
+  for pts in /dev/pts/[0-9]*; do
+    [[ -O "$pts" ]] || continue
+    n=${pts#/dev/pts/}
+    lider=$(ps -t "pts/$n" -o pid=,stat= 2>/dev/null | awk '$2 ~ /s/ {print $1; exit}')
+    [[ -z "$lider" ]] && continue
+    cwd=$(readlink "/proc/$lider/cwd" 2>/dev/null); cwd=${cwd/#$HOME/\~}
+    fg=$(ps -t "pts/$n" -o stat=,args= 2>/dev/null | awk '$1 ~ /\+/ {$1=""; sub(/^ /,""); print; exit}')
+    printf '  %-7s %-28s %s' "$n" "${cwd:-?}" "${fg:0:50}"
+    [[ "$pts" == "$yo" ]] && printf '   \033[2m<- esta\033[0m'
+    echo ""
+  done
+  echo ""
 }
 
 # ------------------------------------------------------------------ argumentos
 [[ $# -eq 0 ]] && { uso; exit 0; }
 case "$1" in
   -h|--help|help|ayuda) uso; exit 0 ;;
+  -l|--lista|--list) listar; exit 0 ;;
 esac
+
+# -a / -t: recolorear una terminal ya abierta en vez de abrir una nueva
+TTY_DESTINO=""
+case "$1" in
+  -a|--aqui|--here)
+    TTY_DESTINO=$(tty 2>/dev/null) || TTY_DESTINO=/dev/tty; shift ;;
+  -t|--tty)
+    [[ $# -lt 2 ]] && { echo "  Falta la terminal: $CMD -t <N> <color>   (ver $CMD -l)"; exit 1; }
+    TTY_DESTINO=$2; [[ "$TTY_DESTINO" =~ ^[0-9]+$ ]] && TTY_DESTINO=/dev/pts/$TTY_DESTINO
+    shift 2 ;;
+esac
+if [[ -n "$TTY_DESTINO" ]]; then
+  [[ $# -eq 0 ]] && { echo "  Falta el color."; uso; exit 1; }
+  if [[ ! -w "$TTY_DESTINO" || ! -c "$TTY_DESTINO" ]]; then
+    echo "  No puedo escribir en $TTY_DESTINO. Mira las terminales abiertas con: $CMD -l"
+    exit 1
+  fi
+fi
 
 PEDIDO="${1,,}"
 shift
@@ -84,6 +135,35 @@ if [[ -z "$TEMA" ]]; then
 fi
 
 IFS=: read -r NOMBRE BG FG ACENTO _ _ <<<"$TEMA"
+
+# --------------------------------------------- recolorear una terminal abierta
+# Las secuencias OSC 10/11/12 cambian texto, fondo y cursor de la ventana que
+# las recibe; 110/111/112 los devuelven a los del perfil.
+if [[ -n "$TTY_DESTINO" ]]; then
+  {
+    if [[ -n "$BG" ]]; then
+      printf '\033]11;%s\033\\\033]10;%s\033\\\033]12;%s\033\\' "$BG" "$FG" "$ACENTO"
+    else
+      printf '\033]111\033\\\033]110\033\\\033]112\033\\'
+    fi
+    if [[ -n "$ETIQUETA" ]]; then
+      acento=$(hex2rgb "${ACENTO:-#8A97A6}"); fondo=$(hex2rgb "${BG:-#22262B}")
+      printf '\033]2;%s\033\\' "$ETIQUETA"
+      printf '\n\033[1;48;2;%sm\033[38;2;%sm  %s  \033[0m\n' "$acento" "$fondo" "${ETIQUETA^^}"
+    fi
+  } >"$TTY_DESTINO"
+
+  # La etiqueta queda guardada para que gris_aleatorio.sh la vuelva a poner en
+  # el titulo en cada prompt. "normal" la borra; un color sin etiqueta la deja.
+  dir="${XDG_RUNTIME_DIR:-/tmp/gcolor-$UID}/gcolor"
+  archivo="$dir/titulo-${TTY_DESTINO//\//_}"
+  if [[ -n "$ETIQUETA" ]]; then
+    mkdir -p "$dir" && printf '%s' "$ETIQUETA" >"$archivo"
+  elif [[ -z "$BG" ]]; then
+    rm -f "$archivo"
+  fi
+  exit 0
+fi
 
 # ------------------------------------------------- el rc que pinta la etiqueta
 # Se genera un rc temporal: carga tu ~/.bashrc, dibuja la etiqueta y deja el
@@ -134,6 +214,10 @@ CUERPO
 fi
 
 # ------------------------------------------------------------------- lanzar
+# GCOLOR avisa a gris_aleatorio.sh (cargado desde ~/.bashrc) que esta ventana
+# ya trae color y no debe pintarla de gris.
+[[ -n "$BG" ]] && export GCOLOR="$NOMBRE"
+
 lanzar_ghostty() {
   local args=(--title="${ETIQUETA:-$NOMBRE}")
   [[ -n "$BG" ]] && args+=(--background="$BG" --foreground="$FG"
